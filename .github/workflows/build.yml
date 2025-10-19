@@ -34,7 +34,7 @@ jobs:
       - name: Process upstream tags
         env:
           UPSTREAM_REPO: https://github.com/dexidp/dex.git
-          TAG_SUFFIX: oauth-domain-filter 
+          TAG_SUFFIX: -oauth-domain-filter 
         run: |
           set -e
 

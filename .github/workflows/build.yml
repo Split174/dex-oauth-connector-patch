@@ -35,7 +35,7 @@ jobs:
         env:
           UPSTREAM_REPO: https://github.com/dexidp/dex.git
           TAG_SUFFIX: -oauth-domain-filter
-          MIN_SUPPORTED_TAG: v2.31.0
+          MIN_SUPPORTED_TAG: v2.40.0
         run: |
           set -e
 

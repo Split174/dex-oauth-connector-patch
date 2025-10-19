@@ -1,0 +1,93 @@
+name: Build and Publish Patched Dex
+
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+    inputs:
+      force_rebuild_tag:
+        description: 'Пересобрать конкретный тег (например, v2.38.0)'
+        required: false
+        default: ''
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: write
+
+    steps:
+      - name: Checkout self (для доступа к патчам)
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Process upstream tags
+        env:
+          UPSTREAM_REPO: https://github.com/dexidp/dex.git
+          # Суффикс для ваших тегов и Docker-образов
+          TAG_SUFFIX: -patched 
+          # Название вашего Docker-образа
+          DOCKER_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/dex${{ env.TAG_SUFFIX }}
+        run: |
+          set -e
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          UPSTREAM_TAGS=$(git ls-remote --tags --refs $UPSTREAM_REPO | grep -o 'refs/tags/v[0-9].*' | sed 's#refs/tags/##' | grep -v '{}')
+
+          if [ -n "${{ github.event.inputs.force_rebuild_tag }}" ]; then
+              echo "Forcing rebuild for tag: ${{ github.event.inputs.force_rebuild_tag }}"
+              UPSTREAM_TAGS="${{ github.event.inputs.force_rebuild_tag }}"
+          fi
+
+          for tag in $UPSTREAM_TAGS; do
+            PATCHED_TAG="${tag}${TAG_SUFFIX}"
+
+            # Проверяем, существует ли уже такой тег в НАШЕМ репозитории.
+            # Если да, пропускаем сборку.
+            # Принудительная пересборка игнорирует эту проверку.
+            if [ -z "${{ github.event.inputs.force_rebuild_tag }}" ] && git rev-parse -q --verify "refs/tags/${PATCHED_TAG}" >/dev/null; then
+              echo "Tag ${PATCHED_TAG} already exists. Skipping."
+              continue
+            fi
+
+            echo "--- Processing tag: ${tag} ---"
+
+            git clone --depth 1 --branch "$tag" $UPSTREAM_REPO source
+            cd source
+
+            # Применяем патч(и)
+            # Если патч не применится, скрипт упадет, и вы получите уведомление о сбое сборки.
+            echo "Applying patches..."
+            git apply ../patches/*.patch
+
+            # Собираем и публикуем Docker-образ
+            echo "Building and pushing Docker image: ${DOCKER_IMAGE_NAME}:${tag}"
+            docker buildx build . \
+              --push \
+              --tag "${DOCKER_IMAGE_NAME}:${tag}" \
+              --tag "${DOCKER_IMAGE_NAME}:${tag%-*}" # Например, для v2.38.0-patched добавит тег v2.38-patched
+            
+            # Возвращаемся в корень, чтобы создать и запушить Git-тег
+            cd ..
+
+            echo "Pushing new git tag ${PATCHED_TAG}"
+            git commit --allow-empty -m "Build patched version for upstream tag ${tag}"
+            git tag -a "${PATCHED_TAG}" -m "Release for ${tag}"
+            git push origin "${PATCHED_TAG}"
+
+            rm -rf source
+          done
+          
+          echo "All new tags processed."

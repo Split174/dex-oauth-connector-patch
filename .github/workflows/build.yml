@@ -34,14 +34,15 @@ jobs:
       - name: Process upstream tags
         env:
           UPSTREAM_REPO: https://github.com/dexidp/dex.git
-          TAG_SUFFIX: -oauth-domain-filter 
+          TAG_SUFFIX: -oauth-domain-filter
+          MIN_SUPPORTED_TAG: v2.31.0
         run: |
           set -e
 
           OWNER_LOWERCASE=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-
           DOCKER_IMAGE_NAME="ghcr.io/${OWNER_LOWERCASE}/dex${TAG_SUFFIX}"
-          echo "Docker image name will be: ${DOCKER_IMAGE_NAME}"
+          
+          echo "Docker image name will be: $DOCKER_IMAGE_NAME"
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -56,12 +57,16 @@ jobs:
           for tag in $UPSTREAM_TAGS; do
             PATCHED_TAG="${tag}${TAG_SUFFIX}"
 
-            # Проверяем, существует ли уже такой тег в НАШЕМ репозитории.
-            # Если да, пропускаем сборку.
-            # Принудительная пересборка игнорирует эту проверку.
             if [ -z "${{ github.event.inputs.force_rebuild_tag }}" ] && git rev-parse -q --verify "refs/tags/${PATCHED_TAG}" >/dev/null; then
               echo "Tag ${PATCHED_TAG} already exists. Skipping."
               continue
+            fi
+            
+            LATEST_VERSION=$(printf "%s\n%s" "$tag" "$MIN_SUPPORTED_TAG" | sort -V | tail -n 1)
+
+            if [ "$LATEST_VERSION" != "$tag" ]; then
+                echo "Skipping tag ${tag} as it is older than minimum supported version ${MIN_SUPPORTED_TAG}."
+                continue
             fi
 
             echo "--- Processing tag: ${tag} ---"
@@ -69,8 +74,6 @@ jobs:
             git clone --depth 1 --branch "$tag" $UPSTREAM_REPO source
             cd source
 
-            # Применяем патч(и)
-            # Если патч не применится, скрипт упадет
             echo "Applying patches..."
             git apply ../patches/*.patch
 
@@ -79,8 +82,7 @@ jobs:
               --push \
               --tag "${DOCKER_IMAGE_NAME}:${tag}" \
               --tag "${DOCKER_IMAGE_NAME}:${tag%-*}"
-            
-            # Возвращаемся в корень, чтобы создать и запушить Git-тег
+
             cd ..
 
             echo "Pushing new git tag ${PATCHED_TAG}"

@@ -34,12 +34,14 @@ jobs:
       - name: Process upstream tags
         env:
           UPSTREAM_REPO: https://github.com/dexidp/dex.git
-          # Суффикс для ваших тегов и Docker-образов
-          TAG_SUFFIX: -patched 
-          # Название вашего Docker-образа
-          DOCKER_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/dex${{ env.TAG_SUFFIX }}
+          TAG_SUFFIX: oauth-domain-filter 
         run: |
           set -e
+
+          OWNER_LOWERCASE=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+
+          DOCKER_IMAGE_NAME="ghcr.io/${OWNER_LOWERCASE}/dex${TAG_SUFFIX}"
+          echo "Docker image name will be: ${DOCKER_IMAGE_NAME}"
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -68,16 +70,15 @@ jobs:
             cd source
 
             # Применяем патч(и)
-            # Если патч не применится, скрипт упадет, и вы получите уведомление о сбое сборки.
+            # Если патч не применится, скрипт упадет
             echo "Applying patches..."
             git apply ../patches/*.patch
 
-            # Собираем и публикуем Docker-образ
             echo "Building and pushing Docker image: ${DOCKER_IMAGE_NAME}:${tag}"
             docker buildx build . \
               --push \
               --tag "${DOCKER_IMAGE_NAME}:${tag}" \
-              --tag "${DOCKER_IMAGE_NAME}:${tag%-*}" # Например, для v2.38.0-patched добавит тег v2.38-patched
+              --tag "${DOCKER_IMAGE_NAME}:${tag%-*}"
             
             # Возвращаемся в корень, чтобы создать и запушить Git-тег
             cd ..
